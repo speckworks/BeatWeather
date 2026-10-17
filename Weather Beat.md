@@ -6,9 +6,11 @@ Time
 
 City
 
-## Delay on each track
+## Delay pad
 
-Switch a track's delay on, then turn Time and Feedback while the beat plays.
+Touch and drag. Left to right sets delay time, bottom to top sets feedback. M mutes, S solos, and FX picks which tracks the pad plays on.
+
+feedback ↑delay time →
 
 Use your own recordings
 
