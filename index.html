@@ -135,9 +135,10 @@ select,.sel button{font:inherit;font-size:14px;padding:8px 10px;min-height:40px;
 <canvas id="bg" aria-hidden="true"></canvas>
 <header class="top"><h1>Weather Beat</h1>
 <div class="sel grp"><span>Sound: changes the beat</span>
-<select id="city" aria-label="City"><option value="havana">Havana</option><option value="bogota">Bogotá</option><option value="lagos">Lagos</option><option value="ny">New York</option></select>
+<select id="city" aria-label="City"><option value="havana">Havana</option><option value="bogota">Bogotá</option><option value="lagos">Lagos</option><option value="ny">New York</option><option value="dublin">Dublin</option><option value="shanghai">Shanghai</option><option value="sydney">Sydney</option><option value="kl">Kuala Lumpur</option><option value="durban">Durban</option></select>
 <select id="wx" aria-label="Weather"><option value="live">Live weather</option><option value="clear">Clear</option><option value="cloudy">Cloudy</option><option value="rain">Rain</option></select>
 <select id="meter" aria-label="Meter"><option value="16">4/4</option><option value="14">7/8</option><option value="20">5/4</option><option value="12">6/8</option><option value="22">11/8</option></select>
+<select id="sound" aria-label="Synth sound"><option value="city">Each city's own sound</option><option value="classic">Classic</option><option value="duo">Duodendru: warm, smoky, dusty</option><option value="bal">BalFinium: hypnotic drums and drone</option><option value="oli">Oliveest: cerebral glitch mosaic</option><option value="dul">Dullindoon: dry, spatial, sub</option></select>
 </div>
 <div class="sel grp look"><span>Look only: changes colors and background, not the sound</span>
 <select id="skin" aria-label="Skin"><optgroup label="Realistic"><option value="enamel">Hot-rod enamel</option><option value="brass">Brushed brass</option><option value="dl4">Green stompbox</option><option value="moog">Black and wood analog</option><option value="boss">Cream and cyan digital</option><option value="chroma">White console, color knobs</option></optgroup><optgroup label="Painted"><option value="rust">Rust</option><option value="steam">Steampunk</option><option value="dub">Dublab</option><option value="punk">Punk basement</option></optgroup></select>
@@ -165,7 +166,12 @@ const CITY={
  havana:{n:'Havana',tz:'America/Havana',la:23.13,lo:-82.38,bpm:100,root:'A',t:29,d:'x.....x.x.....x.',p:'x..x...x..x.x...',h:'..x...x...x...x.',pn:'G5',p2:'x..x..x...x.x.x.'},
  bogota:{n:'Bogotá',tz:'America/Bogota',la:4.71,lo:-74.07,bpm:90,root:'D',t:15,d:'x.......x.......',p:'..x...x...x...x.',h:'x.xxx.xxx.xxx.xx',pn:'E4',p2:'..x.x.x...x.x.x.'},
  lagos:{n:'Lagos',tz:'Africa/Lagos',la:6.52,lo:3.38,bpm:110,root:'G',t:30,d:'x.....x...x.....',p:'....x.......x...',h:'xxxxxxxxxxxxxxxx',pn:'A4',p2:'..x...x.x...x.x.'},
- ny:{n:'New York',tz:'America/New_York',la:40.71,lo:-74.01,bpm:112,root:'E',t:14,d:'x......x..x.....',p:'....x.......x...',h:'x.x.x.x.x.x.x.x.',pn:'D4',p2:'....x..x....x.x.'}
+ ny:{n:'New York',tz:'America/New_York',la:40.71,lo:-74.01,bpm:112,root:'E',t:14,d:'x......x..x.....',p:'....x.......x...',h:'x.x.x.x.x.x.x.x.',pn:'D4',p2:'....x..x....x.x.'},
+ dublin:{n:'Dublin',tz:'Europe/Dublin',la:53.35,lo:-6.26,bpm:84,root:'F',t:11,d:'x.....x....',p:'..x..x...',h:'x.xx.x.',pn:'A4',p2:'.x..x....',pal:'duo',free:1},
+ shanghai:{n:'Shanghai',tz:'Asia/Shanghai',la:31.23,lo:121.47,bpm:108,root:'B',t:18,d:'x..x.....x.x..',p:'.x..x.x...',h:'xxx.x..xx.',pn:'C6',p2:'x...x...x..x...',pal:'oli'},
+ sydney:{n:'Sydney',tz:'Australia/Sydney',la:-33.87,lo:151.21,bpm:112,root:'D',t:22,d:'x..x..x.',p:'x..x.',h:'.',pn:'E5',p2:'..x..x.',pal:'dul',free:1},
+ kl:{n:'Kuala Lumpur',tz:'Asia/Kuala_Lumpur',la:3.14,lo:101.69,bpm:96,root:'E',t:30,d:'x.....x..x..',p:'x..x.x....',h:'x.x..',pn:'G3',p2:'..x...x...x..x.',pal:'bal',free:1},
+ durban:{n:'Durban',tz:'Africa/Johannesburg',la:-29.86,lo:31.02,bpm:124,root:'G',t:21,d:'x..x..x...x..x..',p:'..x...x.....x...',h:'..x...x...x...x.',pn:'C4',p2:'....x.....x.x...',pal:'dul'}
 };
 let dx=.4,dy=.4,mixv=.5,ck='havana',live=null,step=0,walk=4,dens=.5,playing=false,built=false,T=[];
 const NAMES=[['Drum','--a'],['Perc','--b'],['Bass','--ink'],['Lead','--a']];
@@ -188,29 +194,73 @@ $('#mix').addEventListener('click',e=>{
 
 // ---------- audio ----------
 function build(){
- built=true;Tone.Destination.volume.value=-4;
- const mk=(srcs,vol)=>{const dl=new Tone.FeedbackDelay({delayTime:.3,feedback:.4,wet:0});const ch=new Tone.Channel({volume:vol}).toDestination();const gate=new Tone.Gain(1);srcs.forEach(s=>s.connect(gate));gate.connect(dl);dl.connect(ch);return{gate,dl,ch}};
- const drum=new Tone.MembraneSynth({pitchDecay:.04,octaves:5,envelope:{attack:.001,decay:.35,sustain:0}});
- const perc=new Tone.MembraneSynth({pitchDecay:.01,octaves:1.5,envelope:{attack:.001,decay:.09,sustain:0}});
- const hat=new Tone.NoiseSynth({noise:{type:'white'},envelope:{attack:.001,decay:.05,sustain:0}});
- const hf=new Tone.Filter(7000,'highpass');hat.connect(hf);hat.volume.value=-12;
- const bass=new Tone.MonoSynth({oscillator:{type:'sawtooth'},filter:{Q:3,type:'lowpass',rolloff:-24},envelope:{attack:.01,decay:.25,sustain:.4,release:.2},filterEnvelope:{attack:.01,decay:.25,sustain:.2,baseFrequency:110,octaves:3}});
- const lead=new Tone.DuoSynth({vibratoAmount:.4,vibratoRate:5,harmonicity:1.5});
- const lf=new Tone.Filter(2500,'lowpass');lead.connect(lf);
- T=[mk([drum],-6),mk([perc,hf],-8),mk([bass],-8),mk([lead&&lf],-14)];
- T.lf=lf;T.v={drum,perc,hat,bass,lead};gates();
+ built=true;Tone.Destination.volume.value=-3;
+ const master=new Tone.Gain(1),comp=new Tone.Compressor(-20,3),crush=new Tone.BitCrusher(5),vib=new Tone.Vibrato(.5,.2),tape=new Tone.Filter(18000,'lowpass'),lim=new Tone.Limiter(-1);
+ crush.wet.value=0;vib.wet.value=0;master.chain(comp,crush,vib,tape,lim,Tone.Destination);
+ const hiss=new Tone.Noise('pink'),hl=new Tone.Filter(7000,'lowpass');hiss.chain(hl,master);hiss.volume.value=-100;hiss.start();
+ /* each lane: gate, high-pass so lanes stay out of each other's way, optional low-pass, delay, channel */
+ const mk=(vol,hp,lp)=>{const dl=new Tone.FeedbackDelay({delayTime:.3,feedback:.4,wet:0}),ch=new Tone.Channel({volume:vol}).connect(master),gate=new Tone.Gain(1),eq=new Tone.Filter(hp,'highpass');gate.connect(eq);let f=null;if(lp){f=new Tone.Filter(lp,'lowpass');eq.connect(f);f.connect(dl)}else eq.connect(dl);dl.connect(ch);return{gate,dl,ch,lf:f}};
+ T=[mk(-5,30),mk(-8,120),mk(-7,30),mk(-12,120,2500)];
+ T.lf=T[3].lf;T.fx={crush,vib,tape,hiss};
+ gates();setPal();
  new Tone.Loop(t=>{
-  const c=CITY[ck],L=+$('#meter').value||16,i=step%L,n=Math.floor(step/L),v=T.v,fill=n%4===3&&i>=L-4,pp=n%2?c.p2:c.p;
-  const x=(s,g)=>s[i%16]==='x'?(!i||Math.random()>.07):Math.random()<g;
-  if(!i||x(c.d,.03)){v.drum.triggerAttackRelease('C1','8n',t,i?.6:1);v.bass.triggerAttackRelease(note(i%8?4:0,2),'8n',t);ping(0,t);ping(2,t)}
-  if(fill||x(pp,.1)){v.perc.triggerAttackRelease(Tone.Frequency(c.pn).transpose([0,0,5,-7,12][Math.random()*5|0]).toNote(),'32n',t,.5+Math.random()*.5);ping(1,t)}
-  if(fill||x(c.h,.18))v.hat.triggerAttackRelease('64n',t,i%4?.3:.8);
-  if(i%2===0&&Math.random()<dens){walk=Math.max(0,Math.min(9,walk+(Math.random()<.5?-1:1)));v.lead.triggerAttackRelease(note(walk,4),'8n',t,.6);ping(3,t)}
+  const c=CITY[ck],p=cp,K=kit(p.k),L=+$('#meter').value||16,i=step%L,n=Math.floor(step/L),fill=!c.free&&n%4===3&&i>=L-4;
+  const x=(s,g)=>{const j=s.length===16?i%16:step%s.length;return s[j]==='x'?(!i||Math.random()>.06):Math.random()<g*p.gm};
+  if(K.bar&&!i)K.bar(n,t);
+  if(c.free?x(c.d,.02):(!i||x(c.d,.02))){K.kick(t,i?.75:1);ping(0,t);if(p.bass&&(i%8===0||Math.random()<.3)){K.bass(note(i%8?4:0,p.bo),t);ping(2,t)}}
+  if(fill||x(c.p,.05)){K.p1(t,.5+Math.random()*.4,c);ping(1,t);if(p.burst&&Math.random()<p.burst)for(let k=1;k<4;k++)K.p1(t+k*.045,.35,c)}
+  if(x(c.p2,0)){K.p2(t,.55,c);ping(1,t)}
+  if(fill||x(c.h,.1))K.hat(t,i%4?.35:.7);
+  if(p.crack&&Math.random()<p.crack*.25)K.hat(t,rv(.1,.4));
+  if(!i&&n%2===0)LP=Math.random()<p.lp?phrase(L):[];
+  const ln=LP[i];if(ln){K.lead(note(ln[0],4),t,ln[1]*Tone.Time('16n').toSeconds()*.95);ping(3,t)}
   step++;
  },'16n').start(0);
 }
 const isNight=()=>{const h=+new Intl.DateTimeFormat('en-GB',{hour:'numeric',hour12:false,timeZone:CITY[ck].tz}).format(new Date())%24;return h<6||h>=19};
-const scale=()=>isNight()?[0,3,5,7,10]:[0,2,4,7,9];
+/* sound palettes. Each builds its own small kit of voices on first use, so every palette sounds distinct.
+   gm scales ghost notes, ld lead density, bo bass octave; crush, vib, tape and hiss shape the whole mix. */
+const PAL={
+ classic:{n:'classic sound',k:'classic',gm:1,lp:.75,bo:2,bass:1,crush:0,vib:0,tape:18000,hiss:-100,crack:0,burst:0},
+ duo:{n:'Duodendru sound',k:'duo',gm:.25,lp:.6,bo:2,bass:1,crush:.12,vib:.5,tape:4800,hiss:-36,crack:.5,burst:0,sc:[0,3,5,7,10]},
+ bal:{n:'BalFinium sound',k:'bal',gm:.4,lp:.35,bo:2,bass:1,crush:0,vib:0,tape:12000,hiss:-100,crack:0,burst:0},
+ oli:{n:'Oliveest sound',k:'oli',gm:1,lp:.7,bo:2,bass:1,crush:.35,vib:.1,tape:18000,hiss:-100,crack:.15,burst:.2,sc:[0,2,3,6,8]},
+ dul:{n:'Dullindoon sound',k:'dul',gm:0,lp:.7,bo:1,bass:1,crush:0,vib:0,tape:18000,hiss:-100,crack:0,burst:0}
+};
+let cp=PAL.classic,LP=[];
+function phrase(L){const a=Array(L).fill(null);let w=walk,q=0;while(q<L){if(Math.random()<.7){w=Math.max(0,Math.min(9,w+(Math.random()<.5?-1:1)*(Math.random()<.3?2:1)));const len=Math.min(L-q,[2,3,4,6][Math.random()*4|0]);a[q]=[w,len];q+=len}else q+=2}walk=w;return a}
+const rv=(a,b)=>a+Math.random()*(b-a),lane=i=>T[i].gate,KITS={};
+const mem=(pd,oc,dec,ln,vol,dst)=>{const v=new Tone.MembraneSynth({pitchDecay:pd,octaves:oc,envelope:{attack:.001,decay:dec,sustain:0,release:.01}}).connect(dst||lane(ln));v.volume.value=vol||0;return v};
+const nzv=(dec,type,f,q,ln,vol,dst)=>{const s=new Tone.NoiseSynth({noise:{type:'white'},envelope:{attack:.001,decay:dec,sustain:0}}),fl=new Tone.Filter(f,type);fl.Q.value=q;s.connect(fl);fl.connect(dst||lane(ln));s.volume.value=vol||0;return{s,fl}};
+const fmv=(h,mi,dec,ln,vol,osc,dst)=>{const v=new Tone.FMSynth({harmonicity:h,modulationIndex:mi,oscillator:{type:osc||'sine'},modulation:{type:osc==='square'?'square':'sine'},envelope:{attack:.001,decay:dec,sustain:0,release:.05},modulationEnvelope:{attack:.001,decay:dec*.6,sustain:0}}).connect(dst||lane(ln));v.volume.value=vol||0;return v};
+const monov=(osc,dec,sus,rel,fc,ln,vol)=>{const v=new Tone.MonoSynth({oscillator:{type:osc},envelope:{attack:.005,decay:dec,sustain:sus,release:rel},filter:{Q:1,type:'lowpass',rolloff:-24},filterEnvelope:{attack:.005,decay:dec*.7,sustain:0,baseFrequency:fc,octaves:2.5}}).connect(lane(ln));v.volume.value=vol||0;return v};
+const up=(c,st)=>Tone.Frequency(c.pn).transpose(st).toNote();
+const MAKE={
+ /* classic: tight kick, wood and hand-drum tones at fixed pitches, clean hat, short plucked bass, simple pluck lead */
+ classic:()=>{const k=mem(.03,3.5,.3,0),a=mem(.005,.5,.06,1,-4),b=mem(.02,1,.18,1,-4),h=nzv(.04,'highpass',7000,.5,1,-14),bs=monov('triangle',.22,.1,.15,90,2,0),ld=new Tone.MonoSynth({portamento:.05,oscillator:{type:'fatsawtooth',count:2,spread:14},envelope:{attack:.02,decay:.25,sustain:.55,release:.3},filter:{Q:3,type:'lowpass',rolloff:-24},filterEnvelope:{attack:.02,decay:.3,sustain:.25,release:.3,baseFrequency:260,octaves:3.2}}).connect(lane(3));ld.volume.value=-4;
+  return{kick:(t,v)=>k.triggerAttackRelease('A1','8n',t,v),p1:(t,v,c)=>a.triggerAttackRelease(c.pn,'32n',t,v),p2:(t,v,c)=>b.triggerAttackRelease(up(c,-7),'16n',t,v),hat:(t,v)=>h.s.triggerAttackRelease('64n',t,v),bass:(n,t)=>bs.triggerAttackRelease(n,'16n',t),lead:(n,t,d)=>ld.triggerAttackRelease(n,d,t,.6)}},
+ /* Duodendru: soft thud, dusty micro-grain ticks, muted drum, warm electric-piano tone, tape hiss and wobble */
+ duo:()=>{const k=mem(.05,2,.4,0,-2),g=nzv(.02,'bandpass',2500,2,1,-10),b=mem(.03,1,.16,1,-6),d=nzv(.008,'highpass',5000,.5,1,-22),bs=monov('sine',.5,.4,.5,200,2,0),ld=new Tone.DuoSynth({portamento:.08,vibratoAmount:.3,vibratoRate:4.5,harmonicity:1.005,voice0:{oscillator:{type:'triangle'},envelope:{attack:.08,release:.8}},voice1:{oscillator:{type:'sawtooth'},envelope:{attack:.1,release:.8}}}).connect(lane(3));ld.volume.value=-8;
+  return{kick:(t,v)=>k.triggerAttackRelease('F1','8n',t,v*.8),p1:(t,v)=>{g.fl.frequency.setValueAtTime(rv(900,5200),t);g.s.triggerAttackRelease('64n',t,v)},p2:(t,v,c)=>b.triggerAttackRelease(c.pn,'16n',t,v),hat:(t,v)=>d.s.triggerAttackRelease('64n',t,v*.7),bass:(n,t)=>bs.triggerAttackRelease(n,'8n',t,.8),lead:(n,t,d)=>ld.triggerAttackRelease(n,d,t,.5)}},
+ /* BalFinium: deep batter-head toms, cymbal and ride pings, a slowly breathing drone */
+ bal:()=>{const t1=mem(.025,1.6,.6,0,-2),t2=mem(.03,1.3,.4,1,-4),r=fmv(5.1,28,.45,1,-16,'square'),cr=fmv(5.1,24,.12,1,-18,'square'),bs=monov('sine',.4,.6,.5,160,2,0),dr=new Tone.Synth({oscillator:{type:'sawtooth'},envelope:{attack:1.5,decay:0,sustain:1,release:3}}),df=new Tone.Filter(260,'lowpass');dr.connect(df);df.connect(lane(3));dr.volume.value=-20;new Tone.LFO(.07,160,420).connect(df.frequency).start();const ld=new Tone.MonoSynth({portamento:.1,oscillator:{type:'square'},envelope:{attack:.15,decay:.3,sustain:.6,release:.6},filter:{Q:2,type:'lowpass',rolloff:-24},filterEnvelope:{attack:.15,decay:.4,sustain:.3,release:.5,baseFrequency:300,octaves:2.5}}).connect(lane(3));ld.volume.value=-10;
+  return{kick:(t,v)=>t1.triggerAttackRelease('D2','8n',t,v),p1:(t,v)=>r.triggerAttackRelease('A5','16n',t,v*.6),p2:(t,v,c)=>t2.triggerAttackRelease(c.pn,'8n',t,v),hat:(t,v)=>cr.triggerAttackRelease('C6','32n',t,v*.5),bass:(n,t)=>bs.triggerAttackRelease(n,'8n',t,.7),lead:(n,t,d)=>ld.triggerAttackRelease(n,d,t,.5),bar:(n,t)=>{if(n%2===0)dr.triggerAttackRelease(note(0,2),'2m',t,.5)}}},
+ /* Oliveest: tiny wood, metal and noise fragments, each thrown to a random place in the stereo field, bit-crushed bursts */
+ oli:()=>{const pan=new Tone.Panner(0).connect(lane(1)),k=mem(.005,2,.07,0,-2),w=mem(.004,.4,.03,1,-6,pan),m=fmv(5.1,20,.06,1,-18,'square',pan),z=nzv(.015,'bandpass',3500,3,1,-10,pan),bs=monov('sine',.15,.1,.1,140,2,0),pl=new Tone.MonoSynth({portamento:.02,oscillator:{type:'sawtooth'},envelope:{attack:.005,decay:.12,sustain:.25,release:.08},filter:{Q:8,type:'lowpass',rolloff:-24},filterEnvelope:{attack:.005,decay:.14,sustain:.2,release:.1,baseFrequency:400,octaves:3.5}}).connect(lane(3));pl.volume.value=-6;
+  const at=t=>pan.pan.setValueAtTime(rv(-.8,.8),t);
+  return{kick:(t,v)=>k.triggerAttackRelease('C2','16n',t,v),p1:(t,v,c)=>{at(t);if(Math.random()<.5)w.triggerAttackRelease(up(c,[0,3,7,12][Math.random()*4|0]),'64n',t,v);else m.triggerAttackRelease(['A5','C#6','F6'][Math.random()*3|0],'64n',t,v*.6)},p2:(t,v)=>{at(t);z.fl.frequency.setValueAtTime(rv(1500,6000),t);z.s.triggerAttackRelease('64n',t,v)},hat:(t,v)=>{at(t);m.triggerAttackRelease('E6','64n',t,v*.4)},bass:(n,t)=>bs.triggerAttackRelease(n,'16n',t,.7),lead:(n,t,d)=>pl.triggerAttackRelease(n,d,t,.5)}},
+ /* Dullindoon: dry, sparse, close: tight click kick, two wooden clicks, a long sine sub, dry FM plucks, no hats */
+ dul:()=>{const k=mem(.01,2,.15,0,-2),w1=mem(.003,.3,.035,1,-3),w2=mem(.004,.4,.05,1,-3),bs=monov('sine',.8,.9,.4,120,2,0),pl=new Tone.FMSynth({portamento:.03,harmonicity:1,modulationIndex:3.5,oscillator:{type:'sine'},envelope:{attack:.01,decay:.25,sustain:.55,release:.18},modulationEnvelope:{attack:.01,decay:.3,sustain:.3,release:.2}}).connect(lane(3));pl.volume.value=-6;
+  return{kick:(t,v)=>k.triggerAttackRelease('C2','16n',t,v),p1:(t,v,c)=>w1.triggerAttackRelease(up(c,12),'64n',t,v),p2:(t,v,c)=>w2.triggerAttackRelease(c.pn,'64n',t,v*.8),hat:()=>{},bass:(n,t)=>bs.triggerAttackRelease(n,'8n',t,.8),lead:(n,t,d)=>pl.triggerAttackRelease(n,d,t,.5)}}
+};
+const kit=n=>KITS[n]||(KITS[n]=MAKE[n]());
+function setPal(){
+ const v=$('#sound').value;cp=PAL[v==='city'?(CITY[ck].pal||'classic'):v];
+ if(!built)return;
+ const f=T.fx,p=cp;kit(p.k);
+ f.crush.wet.rampTo(p.crush,.3);f.vib.wet.rampTo(p.vib,.3);f.tape.frequency.rampTo(p.tape,.3);f.hiss.volume.rampTo(p.hiss,.6);
+}
+const scale=()=>cp.sc||(isNight()?[0,3,5,7,10]:[0,2,4,7,9]);
 function note(i,oct){const s=scale();return Tone.Frequency(CITY[ck].root+oct).transpose(s[i%5]+12*Math.floor(i/5)).toNote()}
 function cond(){
  const c=CITY[ck],w=$('#wx').value;
@@ -219,11 +269,11 @@ function cond(){
  if(w==='rain')return{T:c.t,cl:.9,rain:true,src:'manual'};
  return live&&live.k===ck?live:{T:c.t,cl:.3,rain:false,src:'offline'};
 }
-function apply(){
+function apply(){setPal();
  const c=CITY[ck],w=cond(),bpm=Math.round(c.bpm+(w.T-15)/3);
  $('#place').textContent=c.n;
  const tm=new Intl.DateTimeFormat('en-GB',{hour:'2-digit',minute:'2-digit',timeZone:c.tz}).format(new Date());
- $('#meta').textContent=`${Math.round(w.T)}°C, ${w.rain?'rain':w.cl>.6?'cloudy':'clear'}, ${tm} local, ${bpm} BPM`+(w.src==='offline'?'. Weather feed unavailable, pick a weather above.':'');
+ $('#meta').textContent=`${Math.round(w.T)}°C, ${w.rain?'rain':w.cl>.6?'cloudy':'clear'}, ${tm} local, ${bpm} BPM, ${cp.n}`+(w.src==='offline'?'. Weather feed unavailable, pick a weather above.':'');
  dens=w.rain?.35:.55;
  if(built){Tone.Transport.bpm.rampTo(bpm,.5);T.lf.frequency.rampTo((700+(1-w.cl)*2800)*(isNight()?.7:1),.5)}
  else Tone.Transport.bpm.value=bpm;
@@ -241,7 +291,7 @@ $('#go').onclick=async()=>{
  if(playing){apply();Tone.Transport.start()}else{Tone.Transport.stop();step=0}
 };
 $('#city').onchange=e=>{ck=e.target.value;apply();fetchLive()};
-$('#wx').onchange=apply;$('#meter').onchange=()=>{step=0};
+$('#wx').onchange=apply;$('#sound').onchange=apply;$('#meter').onchange=()=>{step=0};
 
 // ---------- delay pad ----------
 const pad=$('#pad');
