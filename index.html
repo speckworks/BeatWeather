@@ -129,6 +129,7 @@ select,.sel button{font:inherit;font-size:14px;padding:8px 10px;min-height:40px;
 :root[data-skin="dl4"] .st::before{content:"";position:absolute;top:3px;left:50%;width:12px;height:12px;margin:0 0 0 -6px}
 :root[data-skin="dl4"] .st::after{top:20px;width:46px;height:46px;margin-left:-23px}
 :root[data-skin="dl4"] .foot:active::after,:root[data-skin="dl4"] .st:active::after{transform:translateY(2px);box-shadow:0 0 0 2px #0a140f,0 2px 3px #000b}
+#meta::before{content:"";display:inline-block;width:9px;height:9px;margin-right:7px;border-radius:50%;background:#888;vertical-align:middle}#meta[data-src="live"]::before{background:#2fe27a;box-shadow:0 0 8px 2px #2fe27a99}#meta[data-src="manual"]::before{background:#ffb020;box-shadow:0 0 6px #ffb02088}#meta[data-src="offline"]::before{background:#ff4a3a;box-shadow:0 0 6px #ff4a3a88}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 </style></head>
 <body>
@@ -205,14 +206,14 @@ function build(){
  gates();setPal();
  new Tone.Loop(t=>{
   const c=CITY[ck],p=cp,K=kit(p.k),L=+$('#meter').value||16,i=step%L,n=Math.floor(step/L),fill=!c.free&&n%4===3&&i>=L-4;
-  const x=(s,g)=>{const j=s.length===16?i%16:step%s.length;return s[j]==='x'?(!i||Math.random()>.06):Math.random()<g*p.gm};
+  const x=(s,g)=>{const j=s.length===16?i%16:step%s.length;return s[j]==='x'?(!i||Math.random()>.06):Math.random()<g*p.gm*(dens/.55)};
   if(K.bar&&!i)K.bar(n,t);
   if(c.free?x(c.d,.02):(!i||x(c.d,.02))){K.kick(t,i?.75:1);ping(0,t);if(p.bass&&(i%8===0||Math.random()<.3)){K.bass(note(i%8?4:0,p.bo),t);ping(2,t)}}
   if(fill||x(c.p,.05)){K.p1(t,.5+Math.random()*.4,c);ping(1,t);if(p.burst&&Math.random()<p.burst)for(let k=1;k<4;k++)K.p1(t+k*.045,.35,c)}
   if(x(c.p2,0)){K.p2(t,.55,c);ping(1,t)}
   if(fill||x(c.h,.1))K.hat(t,i%4?.35:.7);
   if(p.crack&&Math.random()<p.crack*.25)K.hat(t,rv(.1,.4));
-  if(!i&&n%2===0)LP=Math.random()<p.lp?phrase(L):[];
+  if(!i&&n%2===0)LP=Math.random()<p.lp*(dens/.55)?phrase(L):[];
   const ln=LP[i];if(ln){K.lead(note(ln[0],4),t,ln[1]*Tone.Time('16n').toSeconds()*.95);ping(3,t)}
   step++;
  },'16n').start(0);
@@ -273,7 +274,9 @@ function apply(){setPal();
  const c=CITY[ck],w=cond(),bpm=Math.round(c.bpm+(w.T-15)/3);
  $('#place').textContent=c.n;
  const tm=new Intl.DateTimeFormat('en-GB',{hour:'2-digit',minute:'2-digit',timeZone:c.tz}).format(new Date());
- $('#meta').textContent=`${Math.round(w.T)}°C, ${w.rain?'rain':w.cl>.6?'cloudy':'clear'}, ${tm} local, ${bpm} BPM, ${cp.n}`+(w.src==='offline'?'. Weather feed unavailable, pick a weather above.':'');
+ const lab={live:'LIVE',manual:'MANUAL',offline:'OFFLINE'}[w.src];
+ $('#meta').dataset.src=w.src;
+ $('#meta').textContent=`${lab}: ${Math.round(w.T)}°C, ${w.rain?'rain':w.cl>.6?'cloudy':'clear'}, ${tm} local, ${bpm} BPM, ${cp.n}`+(w.src==='live'?` (feed updated ${live.at})`:w.src==='offline'?'. No weather feed reachable, so defaults are in use. Pick a weather above.':'. Set by you, not the feed.');
  dens=w.rain?.35:.55;
  if(built){Tone.Transport.bpm.rampTo(bpm,.5);T.lf.frequency.rampTo((700+(1-w.cl)*2800)*(isNight()?.7:1),.5)}
  else Tone.Transport.bpm.value=bpm;
@@ -282,7 +285,7 @@ function apply(){setPal();
 async function fetchLive(){
  const c=CITY[ck],k=ck;
  try{const r=await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${c.la}&longitude=${c.lo}&current=temperature_2m,weather_code,cloud_cover`);
-  const j=(await r.json()).current;live={k,T:j.temperature_2m,cl:j.cloud_cover/100,rain:j.weather_code>=51,src:'live'}}catch(e){live=null}
+  const j=(await r.json()).current;live={k,T:j.temperature_2m,cl:j.cloud_cover/100,rain:j.weather_code>=51,src:'live',at:new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}}catch(e){live=null}
  apply();
 }
 $('#go').onclick=async()=>{
@@ -353,6 +356,6 @@ function frame(){
 addEventListener('resize',size);size();
 let st=null,sk='rust';try{st=localStorage.getItem('wb-theme');sk=localStorage.getItem('wb-skin')||'rust'}catch(e){}
 R.dataset.theme=st||(mq.matches?'dark':'light');setSkin(sk);
-apply();fetchLive();frame();
+apply();fetchLive();setInterval(fetchLive,6e5);frame();
 </script>
 </body></html>
