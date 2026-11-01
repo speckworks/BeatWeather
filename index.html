@@ -241,7 +241,7 @@ function build(){
  pre.chain(crush,vib,wow,flut,tape);
  tape.connect(lim);lim.connect(lg);lg.connect(post);tape.connect(lbg);lbg.connect(post);
  post.chain(trim,outg,final,Tone.Destination);Tone.Destination.volume.value=0;
- makeTap(trim).then(t=>{REC=t});makeTap(final).then(t=>{OUT=t});
+ REC=lazyTap(trim);OUT=lazyTap(final);
  const hiss=new Tone.Noise('pink'),hl=new Tone.Filter(7000,'lowpass');hiss.chain(hl,master);hiss.volume.value=-100;hiss.start();
  /* each lane: gate, high-pass so lanes stay out of each other's way, optional low-pass, delay, channel */
  const mk=(vol,hp,lp)=>{const dl=new Tone.FeedbackDelay({delayTime:.3,feedback:.4,wet:0}),ch=new Tone.Channel({volume:vol}).connect(master),gate=new Tone.Gain(1),eq=new Tone.Filter(hp,'highpass'),ph=new Tone.Phaser({frequency:.5,octaves:3,baseFrequency:350,wet:0}),ap=new Tone.AutoPanner({frequency:1.2,depth:0}).start();ap.wet.value=0;gate.connect(eq);let f=null;if(lp){f=new Tone.Filter(lp,'lowpass');eq.connect(f);f.connect(ph)}else eq.connect(ph);ph.connect(ap);ap.connect(dl);dl.connect(ch);return{gate,dl,ch,lf:f,ph,ap}};
@@ -354,20 +354,35 @@ else if(m.rec===1){this.r=1;this.rc=[];this.cur=[new Float32Array(4096),new Floa
 else if(m.rec===0&&this.r){this.r=0;this.rc.push(this.cur.map(a=>a.slice(0,this.cp)));const tr=[];this.rc.forEach(p=>tr.push(p[0].buffer,p[1].buffer));this.port.postMessage({chunks:this.rc,sr:sampleRate},tr);this.rc=[];this.cur=null}}}
 process(i){const x=i[0];if(x&&x.length){const L=x[0].length;for(let c=0;c<2;c++){const d=x[Math.min(c,x.length-1)];for(let k=0;k<L;k++)this.b[c][(this.w+k)%this.n]=d[k];if(this.r)this.cur[c].set(d,this.cp)}if(this.r){this.cp+=L;if(this.cp>=4096){this.rc.push(this.cur);this.cur=[new Float32Array(4096),new Float32Array(4096)];this.cp=0}}this.w=(this.w+L)%this.n}return true}}registerProcessor('rec',Rec)`;
 async function makeTap(node){
- const ctx=Tone.getContext().rawContext;let gr=null,st=null;
+ const tc=Tone.getContext(),ctx=tc.rawContext,errs=[],msg=e=>(e&&e.message)||String(e);
+ /* A: audio worklet, created through Tone's own wrapper so the nodes are compatible (lossless, off the main thread) */
  try{
-  await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([WK],{type:'text/javascript'})));
-  const w=new AudioWorkletNode(ctx,'rec',{numberOfInputs:1,numberOfOutputs:1,outputChannelCount:[2]});
+  await tc.addAudioWorkletModule(URL.createObjectURL(new Blob([WK],{type:'text/javascript'})),'rec');
+  const w=tc.createAudioWorkletNode('rec',{numberOfInputs:1,numberOfOutputs:1,outputChannelCount:[2]});
+  let gr=null,st=null;
   w.port.onmessage=e=>{if(e.data.chunks){if(st)st(e.data)}else if(gr)gr(e.data)};
   Tone.connect(node,w);w.connect(ctx.destination);
-  return{grab:sec=>new Promise(res=>{gr=res;w.port.postMessage({g:sec})}),start:()=>w.port.postMessage({rec:1}),stop:()=>new Promise(res=>{st=res;w.port.postMessage({rec:0})})};
- }catch(err){
-  /* older browsers or strict pages: the same buffers on the main thread */
-  const sp=ctx.createScriptProcessor(2048,2,2),n=Math.round(ctx.sampleRate*6),b=[new Float32Array(n),new Float32Array(n)];let wp=0,on=0,rc=[];
+  return{kind:'worklet',grab:sec=>new Promise(res=>{gr=res;w.port.postMessage({g:sec})}),start:()=>w.port.postMessage({rec:1}),stop:()=>new Promise(res=>{st=res;w.port.postMessage({rec:0})})};
+ }catch(e){errs.push('worklet: '+msg(e))}
+ /* B: the same buffers on the main thread (lossless; works where worklets are blocked) */
+ try{
+  const sp=ctx.createScriptProcessor(4096,2,2),n=Math.round(ctx.sampleRate*6),b=[new Float32Array(n),new Float32Array(n)];let wp=0,on=0,rc=[];
   sp.onaudioprocess=ev=>{const i=ev.inputBuffer,ch=[0,1].map(c=>i.getChannelData(Math.min(c,i.numberOfChannels-1)));for(let c=0;c<2;c++)for(let k=0;k<i.length;k++)b[c][(wp+k)%n]=ch[c][k];if(on)rc.push(ch.map(a=>a.slice()));wp=(wp+i.length)%n};
   Tone.connect(node,sp);sp.connect(ctx.destination);
-  return{grab:sec=>{const len=Math.round(ctx.sampleRate*sec),o=[0,1].map(c=>{const a=new Float32Array(len);for(let k=0;k<len;k++)a[k]=b[c][(wp-len+k+n*2)%n];return a});return Promise.resolve({l:o[0],r:o[1],sr:ctx.sampleRate})},start:()=>{rc=[];on=1},stop:()=>{on=0;const r=rc;rc=[];return Promise.resolve({chunks:r,sr:ctx.sampleRate})}};
- }
+  return{kind:'script',grab:sec=>{const len=Math.round(ctx.sampleRate*sec),o=[0,1].map(c=>{const a=new Float32Array(len);for(let k=0;k<len;k++)a[k]=b[c][(wp-len+k+n*2)%n];return a});return Promise.resolve({l:o[0],r:o[1],sr:ctx.sampleRate})},start:()=>{rc=[];on=1},stop:()=>{on=0;const r=rc;rc=[];return Promise.resolve({chunks:r,sr:ctx.sampleRate})}};
+ }catch(e){errs.push('script processor: '+msg(e))}
+ /* C: the browser's own compressed recorder (no reverse, but recording still works) */
+ try{
+  const r=new Tone.Recorder();node.connect(r);
+  return{kind:'compressed',grab:()=>Promise.reject(new Error('reverse needs the lossless recorder')),start:()=>r.start(),stop:async()=>({blob:await r.stop()})};
+ }catch(e){errs.push('compressed recorder: '+msg(e))}
+ throw new Error(errs.join(' | '));
+}
+/* the taps are created asynchronously; this wrapper is available immediately and waits for the real tap when used */
+function lazyTap(node){
+ const p=makeTap(node);p.catch(()=>{});
+ const ready=()=>Promise.race([p,new Promise((_,rj)=>setTimeout(()=>rj(new Error('the audio tap did not start in time')),5000))]);
+ return{start:async()=>{const t=await ready();t.start();return t.kind},stop:async()=>(await p).stop(),grab:async sec=>(await p).grab(sec)};
 }
 const vox=f=>VOX.forEach(v=>(v.detune?[v.detune]:[v.voice0.detune,v.voice1.detune]).forEach(f));
 function stopOn(){
@@ -386,7 +401,7 @@ function stopOff(){
 }
 async function revOn(){
  RVwant=true;if(!built||!REC||RV||!playing)return;
- const d=await REC.grab(4);if(!RVwant||RV)return;
+ let d;try{d=await REC.grab(4)}catch(e){return}if(!RVwant||RV)return;
  const ctx=Tone.getContext().rawContext,buf=ctx.createBuffer(2,d.l.length,d.sr);
  buf.copyToChannel(d.l.reverse(),0);buf.copyToChannel(d.r.reverse(),1);
  const src=ctx.createBufferSource(),rg=ctx.createGain(),n=ctx.currentTime;
@@ -436,8 +451,9 @@ async function recToggle(){
   if(!playing)$('#go').click();
   info.className='recinfo';info.textContent='Starting audio...';
   for(let i=0;i<60&&!(built&&OUT);i++)await sleep(50);
-  if(!(built&&OUT)){info.textContent='Could not start the audio, so nothing is being recorded. Try Start first.';return}
-  $('#outsec').open=true;recOn=true;OUT.start();recT0=performance.now();b.setAttribute('aria-pressed','true');$('#recout').hidden=true;mt.hidden=false;
+  if(!(built&&OUT)){info.textContent='The audio engine did not start, so nothing is being recorded. Press the Start switch, then try Record again.';return}
+  let kind;try{kind=await OUT.start()}catch(err){info.textContent='Could not start recording: '+((err&&err.message)||err);return}
+  $('#outsec').open=true;recOn=true;OUT.how=kind;recT0=performance.now();b.setAttribute('aria-pressed','true');$('#recout').hidden=true;mt.hidden=false;
   recTimer=setInterval(()=>{
    const s=(performance.now()-recT0)/1000,db=T.meter?T.meter.getValue():-99,lv=Math.max(0,Math.min(1,((isFinite(db)?db:-99)+60)/60));
    recTxt=mmss(s);badge();b.textContent='● '+mmss(s);info.className='recinfo live';info.textContent='● Recording '+mmss(s)+'. Tap Record again to stop.';
@@ -447,12 +463,13 @@ async function recToggle(){
  }else{
   recOn=false;clearInterval(recTimer);b.setAttribute('aria-pressed','false');b.textContent='Record';badge();mt.hidden=true;info.className='recinfo';
   try{
-   const d=await OUT.stop(),w=toWav(d.chunks,d.sr);
-   if(!w.secs){info.textContent='Nothing was recorded.';return}
-   if(recUrl)URL.revokeObjectURL(recUrl);recUrl=URL.createObjectURL(w.blob);
-   const db=(20*Math.log10(w.pk||1e-9)).toFixed(1),a=$('#recdl'),c=new Date();
-   $('#recplay').src=recUrl;a.href=recUrl;a.download='weather-beat-'+CITY[ck].n.replace(/\W+/g,'-').toLowerCase()+'-'+String(c.getHours()).padStart(2,'0')+String(c.getMinutes()).padStart(2,'0')+'.wav';
-   info.textContent='Recorded '+mmss(w.secs)+', 24-bit WAV, peak '+db+' dB'+(w.pk>=.999?'. CLIPPED: lower the levels or turn Clean out on.':'. Play it back or save it below.');
+   const d=await OUT.stop();let blob,secs,pk=null,ext='wav';
+   if(d.blob){blob=d.blob;secs=(performance.now()-recT0)/1000;ext=/ogg/.test(blob.type)?'ogg':/mp4|aac/.test(blob.type)?'m4a':'webm'}else{const w=toWav(d.chunks,d.sr);blob=w.blob;secs=w.secs;pk=w.pk}
+   if(!secs||!blob.size){info.textContent='Nothing was recorded.';return}
+   if(recUrl)URL.revokeObjectURL(recUrl);recUrl=URL.createObjectURL(blob);
+   const a=$('#recdl'),c=new Date();
+   $('#recplay').src=recUrl;a.href=recUrl;a.download='weather-beat-'+CITY[ck].n.replace(/\W+/g,'-').toLowerCase()+'-'+String(c.getHours()).padStart(2,'0')+String(c.getMinutes()).padStart(2,'0')+'.'+ext;
+   info.textContent=pk===null?'Recorded '+mmss(secs)+' as compressed '+ext.toUpperCase()+'. This browser could not do a lossless capture, so there is no peak reading. Play it back or save it below.':'Recorded '+mmss(secs)+', 24-bit WAV, peak '+(20*Math.log10(pk||1e-9)).toFixed(1)+' dB'+(pk>=.999?'. CLIPPED: lower the levels or turn Clean out on.':'. Play it back or save it below.');
    $('#recout').hidden=false;
   }catch(err){info.textContent='Recording failed: '+((err&&err.message)||err)}
  }
