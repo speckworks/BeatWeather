@@ -187,7 +187,7 @@ select,.sel button{font:inherit;font-size:14px;padding:8px 10px;min-height:40px;
 </section>
 <div class="tape" role="group" aria-label="Tape effects, hold to engage"><button id="tstop" class="st" data-k="t" aria-pressed="false">Tape stop</button><button id="trev" class="st" data-k="r" aria-pressed="false">Reverse</button><button id="twob" class="st" data-k="r" aria-pressed="false">Wobble</button></div>
 <details id="outsec"><summary>Output and recording<span id="osb"></span></summary>
-<div class="tape" role="group" aria-label="Output controls"><button id="clean" class="st" data-k="c" aria-pressed="false">Clean out</button><button id="rec" class="st" data-k="x" aria-pressed="false">Record</button><button id="stest" class="st" data-k="t" aria-pressed="false">Stereo test</button></div>
+<div class="tape" role="group" aria-label="Output controls"><button id="clean" class="st" data-k="c" aria-pressed="false">Clean out</button><button id="rec" class="st" data-k="x" aria-pressed="false">Record</button></div>
 <div class="recinfo" id="recinfo" aria-live="polite"></div>
 <div id="recmeter" hidden><i></i></div>
 <div id="recout" hidden><audio id="recplay" controls></audio><a id="recdl">Save WAV</a></div>
@@ -408,14 +408,16 @@ async function makeTap(node,always){
   Tone.connect(node,sp);sp.connect(ctx.destination);
   return{kind:'script',grab:sec=>{const len=Math.round(ctx.sampleRate*sec),o=[0,1].map(c=>{const a=new Float32Array(len);for(let k=0;k<len;k++)a[k]=b[c][(wp-len+k+n*2)%n];return a});return Promise.resolve({l:o[0],r:o[1],sr:ctx.sampleRate})},start:()=>{rc=[];on=1},stop:()=>{on=0;const r=rc;rc=[];return Promise.resolve({chunks:r,sr:ctx.sampleRate})}};
  }catch(e){errs.push('script processor: '+msg(e))}
- /* C: Tone's own analyser, read every 120 ms and stitched back together using the audio clock (lossless, and needs nothing but Tone) */
+ /* C: analyser nodes, read every 120 ms and stitched back together using the audio clock (lossless; needs no worklet) */
  try{
-  const sr=ctx.sampleRate,N=32768,P=1024,SR=1500,an=new Tone.Analyser({type:'waveform',size:N,channels:2}),nr=Math.round(sr*6),ring=[new Float32Array(nr),new Float32Array(nr)];
-  node.connect(an);
+  const sr=ctx.sampleRate,N=32768,P=1024,SR=1500,nr=Math.round(sr*6),ring=[new Float32Array(nr),new Float32Array(nr)];
+  const anL=ctx.createAnalyser(),anR=ctx.createAnalyser(),sp2=ctx.createChannelSplitter(2),bufL=new Float32Array(N),bufR=new Float32Array(N);
+  anL.fftSize=N;anR.fftSize=N;Tone.connect(node,sp2);sp2.connect(anL,0);sp2.connect(anR,1);
   let wp=0,rec=false,rc=[],last=null,lastT=0,timer=null;
   const put=(a,b,from,keep)=>{const n=a.length-from;for(let c=0;c<2;c++){const sg=c?b:a;for(let k=0;k<n;k++)ring[c][(wp+k)%nr]=sg[from+k]}wp=(wp+n)%nr;if(rec&&keep)rc.push([a.slice(from),b.slice(from)])};
   const poll=()=>{
-   const v=an.getValue(),t=ctx.currentTime,L=Float32Array.from(v[0]),R=Float32Array.from(v[1]||v[0]);
+   anL.getFloatTimeDomainData(bufL);anR.getFloatTimeDomainData(bufR);
+   const t=ctx.currentTime,L=Float32Array.from(bufL),R=Float32Array.from(bufR);
    if(!last)put(L,R,0,false);
    else{
     const s=Math.round((t-lastT)*sr);
@@ -471,7 +473,7 @@ function stopOff(){
 async function revOn(){
  RVwant=true;if(!built||!REC||RV||!playing)return;
  let d;try{d=await REC.grab(4)}catch(e){$('#astate').textContent='Reverse is unavailable: '+((e&&e.message)||e);return}if(!RVwant||RV)return;
- const ctx=Tone.getContext().rawContext,buf=ctx.createBuffer(2,d.l.length,d.sr);
+ $('#astate').textContent='';const ctx=Tone.getContext().rawContext,buf=ctx.createBuffer(2,d.l.length,d.sr);
  buf.copyToChannel(d.l.reverse(),0);buf.copyToChannel(d.r.reverse(),1);
  const src=ctx.createBufferSource(),rg=ctx.createGain(),n=ctx.currentTime;
  src.buffer=buf;src.loop=true;rg.gain.setValueAtTime(0,n);rg.gain.linearRampToValueAtTime(.95,n+.012);
@@ -543,19 +545,9 @@ async function recToggle(){
   }catch(err){info.textContent='Recording failed: '+((err&&err.message)||err)}
  }
 }
-/* output balance meter, and a stereo test that plays a note left, right, then centre */
+/* output balance meter: left and right levels */
 const lrl=$('#lrl'),lrr=$('#lrr'),lvl=d=>Math.max(0,Math.min(1,((isFinite(d)?d:-99)+60)/60));
 setInterval(()=>{if(!built||!T.meter2)return;const v=T.meter2.getValue(),a=Array.isArray(v)?v:[v,v];lrl.style.width=lvl(a[0])*100+'%';lrr.style.width=lvl(a[1])*100+'%'},80);
-async function stereoTest(){
- const info=$('#recinfo');
- if(!built){if(!playing)$('#go').click();for(let i=0;i<60&&!built;i++)await sleep(50)}
- if(!built){info.textContent='Press Start first, then try the stereo test.';return}
- const sy=new Tone.Synth({oscillator:{type:'sine'},envelope:{attack:.01,decay:.25,sustain:0,release:.05}}),p=new Tone.Panner(-1);sy.connect(p);p.connect(T.final);
- const t=Tone.now()+.05;[[-1,'C5'],[1,'E5'],[0,'G5']].forEach(([x,n],i)=>{p.pan.setValueAtTime(x,t+i*.55);sy.triggerAttackRelease(n,'8n',t+i*.55)});
- info.className='recinfo';info.textContent='Stereo test: you should hear a note on the left, then the right, then the middle.';
- setTimeout(()=>{sy.dispose();p.dispose()},2600);
-}
-$('#stest').addEventListener('click',stereoTest);
 function tog(id,fn){const b=$(id);b.addEventListener('click',()=>{const on=b.getAttribute('aria-pressed')!=='true';b.setAttribute('aria-pressed',String(on));fn(on)})}
 tog('#twob',setWobble);tog('#clean',setClean);$('#rec').addEventListener('click',recToggle);
 
